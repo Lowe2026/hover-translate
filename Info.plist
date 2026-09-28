@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>zh_CN</string>
+    <!-- 显示名和 bundle ID 都不带版本号。旧版把 0.3.3 写进了两者，
+         导致每次升级都被系统当成一个全新 app：菜单栏出现两个同名同图标的实例，
+         而且辅助功能／屏幕录制授权每次都要重新给。版本只写在下面两个版本字段里。 -->
+    <key>CFBundleDisplayName</key>
+    <string>悬停翻译</string>
+    <key>CFBundleName</key>
+    <string>悬停翻译</string>
+    <key>CFBundleIdentifier</key>
+    <string>local.hovertranslate</string>
+    <key>CFBundleExecutable</key>
+    <string>HoverTranslate</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.4.0</string>
+    <key>CFBundleVersion</key>
+    <string>7</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.2</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>Built locally</string>
+</dict>
+</plist>

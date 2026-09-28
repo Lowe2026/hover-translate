@@ -1,0 +1,13 @@
+# SwiftPM 构建产物
+.build/
+*.xcodeproj
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# 私人文档，不公开
+交接记录.md
+
+# 旧版编译产物，本地留档用，不公开
+old-builds/
