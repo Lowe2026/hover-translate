@@ -245,25 +245,49 @@ private enum AccessibilityReader {
         let method: String
     }
 
+    /// 取词结果。
+    ///
+    /// `.frameOnly` 是这套东西里最别扭、也最有用的一种情况：**文字用不了，
+    /// 但边框是准的**——应用总归知道自己把这块东西画在了哪里。
+    ///
+    /// 两种情形都归到这里：
+    /// 1. 节点装着远超一段的内容。AX 不告诉我们光标落在其中第几个字，取前
+    ///    600 字只能从头取，跟用户指的地方无关。
+    /// 2. 一个字都读不出来（Electron 的常态）。
+    ///
+    /// 这两种情况下文字都该丢掉，但**框不能一起丢**——把它交给 OCR，采样
+    /// 范围就能贴着这块文字走，而不是以光标为中心盲开一个固定大小的框。
+    enum Outcome {
+        case text(Result)
+        case frameOnly(CGRect)
+        case nothing
+    }
+
+    /// 文字不可用时的统一出口：有框就把框带出去。
+    private static func fallback(to element: AXUIElement) -> Outcome {
+        guard let box = frame(of: element), box.width > 40, box.height > 10 else { return .nothing }
+        return .frameOnly(box)
+    }
+
     static func requestPermission(prompt: Bool) -> Bool {
         // 直接用字面量：kAXTrustedCheckOptionPrompt 是全局 var，
         // Swift 6 严格并发下不能跨隔离域引用。
         return AXIsProcessTrustedWithOptions(["AXTrustedCheckOptionPrompt": prompt] as CFDictionary)
     }
 
-    static func text(at quartzPoint: CGPoint) -> Result? {
+    static func outcome(at quartzPoint: CGPoint) -> Outcome {
         let system = AXUIElementCreateSystemWide()
         var hoveredRef: AXUIElement?
         guard AXUIElementCopyElementAtPosition(system, Float(quartzPoint.x), Float(quartzPoint.y), &hoveredRef) == .success,
-              let hovered = hoveredRef else { return nil }
+              let hovered = hoveredRef else { return .nothing }
 
         var hoveredPID: pid_t = 0
         AXUIElementGetPid(hovered, &hoveredPID)
-        guard hoveredPID != ProcessInfo.processInfo.processIdentifier else { return nil }
+        guard hoveredPID != ProcessInfo.processInfo.processIdentifier else { return .nothing }
 
         if let selected = selectedText(from: system, matchingPID: hoveredPID, point: quartzPoint),
            let cleaned = TextNormalizer.clean(selected) {
-            return Result(text: cleaned, method: "已选中的整段文字")
+            return .text(Result(text: cleaned, method: "已选中的整段文字"))
         }
 
         // 先拿到鼠标正下方那个元素的文字，再向上找更完整的一段。
@@ -287,15 +311,20 @@ private enum AccessibilityReader {
                     // 扩展后超出一段的体量，停在子级即可，不必整个放弃。
                     guard full.count <= 600 else { break }
                 } else {
-                    // 锚点元素自己就装不下：这一坨没有位置信息可言，交给 OCR。
-                    guard full.count <= 600 else { return nil }
+                    // 锚点元素自己就装不下：文字没有位置信息可言，交给 OCR。
+                    // 但把它的边框带出去——那是这块文字真实的位置和大小。
+                    if full.count > 600 { return fallback(to: element) }
                 }
                 best = full
             }
             current = parent(of: element)
         }
-        guard let best, let cleaned = TextNormalizer.clean(best, maximumLength: 600) else { return nil }
-        return Result(text: cleaned, method: "鼠标悬停文字")
+        // 读不出文字是 Electron 的常态。别把边框一起扔掉——那是这一轮唯一
+        // 还站得住的信息，OCR 拿它开窗比盲开一个固定框准得多。
+        guard let best, let cleaned = TextNormalizer.clean(best, maximumLength: 600) else {
+            return fallback(to: hovered)
+        }
+        return .text(Result(text: cleaned, method: "鼠标悬停文字"))
     }
 
     private static func selectedText(from system: AXUIElement, matchingPID pid: pid_t, point: CGPoint) -> String? {
@@ -383,21 +412,45 @@ private enum OCRReader {
         CGRequestScreenCaptureAccess()
     }
 
-    nonisolated static func text(near quartzPoint: CGPoint) async -> Result? {
+    /// - Parameter hint: 辅助功能给出的那块文字的边框。文字本身不可信（见
+    ///   `AccessibilityReader.Outcome.oversized`），但边框是准的。有它就贴着
+    ///   文字采样，没有就退回以光标为中心的固定框。
+    nonisolated static func text(near quartzPoint: CGPoint, within hint: CGRect?) async -> Result? {
         guard hasPermission() else { return nil }
 
-        let captureWidth: CGFloat = 720
-        let captureHeight: CGFloat = 360
-        var rect = CGRect(
-            x: quartzPoint.x - captureWidth / 2,
-            y: quartzPoint.y - captureHeight / 2,
-            width: captureWidth,
-            height: captureHeight
-        )
+        // 上限而非定值。尺寸不能一味放大——实测 Vision 在 1920×1080 点
+        // （8.3 百万像素）上直接返回 0 行，识别整个失效。1400×520 约
+        // 2.9 百万像素、OCR 约 930 ms，是目前找到的可用区间上沿。
+        let maxWidth: CGFloat = 1400
+        let maxHeight: CGFloat = 520
+
+        var rect: CGRect
+        if let hint, hint.width > 40, hint.height > 10 {
+            // 横向：贴着这块文字自己的宽度走，句子不会被腰斩。
+            // 真比上限还宽时，退回以光标为中心截取上限那一段。
+            let width = min(hint.width + 16, maxWidth)
+            let x = hint.width + 16 <= maxWidth ? hint.minX - 8 : quartzPoint.x - width / 2
+            // 纵向：仍要限高（OCR 成本按像素算），但预算**偏上给**，不再以
+            // 光标为中心平分。理由是文字从上往下读：指在段落中间时，用户
+            // 要的是"从这段开头到这儿"，不是"这儿往下"。段落装得下就整段
+            // 拿——所以短段落的框反而更小，OCR 比固定框快。
+            let headroom = maxHeight - 120
+            let top = max(hint.minY - 4, quartzPoint.y - headroom)
+            let bottom = min(hint.maxY + 4, top + maxHeight)
+            rect = CGRect(x: x, y: top, width: width, height: max(bottom - top, 0))
+        } else {
+            rect = CGRect(
+                x: quartzPoint.x - maxWidth / 2,
+                y: quartzPoint.y - maxHeight / 2,
+                width: maxWidth,
+                height: maxHeight
+            )
+        }
         // 必须用 CGDisplayBounds：它和 quartzPoint 一样是原点左上的全局显示坐标。
         // 旧实现用的 NSScreen.frame 是原点左下的 AppKit 坐标，单屏时数字碰巧一样，
         // 接第二块显示器就会把采样框裁到错误的位置。
         rect = rect.intersection(activeDisplayBounds())
+        Diagnostics.log("采样框 \(Int(rect.width))×\(Int(rect.height)) 点 = \(String(format: "%.1f", rect.width * rect.height * 4 / 1_000_000)) 百万像素 · \(hint == nil ? "固定框" : "跟随边框")")
         guard rect.width > 10, rect.height > 10,
               let image = await captureImage(in: rect) else { return nil }
 
@@ -572,12 +625,19 @@ private final class HoverController {
         }
 
         let quartzPoint = CGEvent(source: nil)?.location ?? CGPoint(x: appKitPoint.x, y: appKitPoint.y)
-        if let result = AccessibilityReader.text(at: quartzPoint) {
+        var ocrHint: CGRect?
+        switch AccessibilityReader.outcome(at: quartzPoint) {
+        case .text(let result):
             Diagnostics.log("辅助功能命中：\(Diagnostics.preview(result.text))")
             submit(source: result.text, method: result.method, at: appKitPoint)
             return
+        case .frameOnly(let box):
+            // 文字不要，边框要。
+            ocrHint = box
+            Diagnostics.log("辅助功能文字不可用，改用它的边框采样：\(Int(box.width))×\(Int(box.height)) @(\(Int(box.minX)), \(Int(box.minY)))")
+        case .nothing:
+            Diagnostics.log("辅助功能没读到文字，转 OCR")
         }
-        Diagnostics.log("辅助功能没读到文字，转 OCR")
 
         guard ocrFallbackEnabled else {
             Diagnostics.log("放弃：OCR 兜底被手动关闭")
@@ -591,7 +651,7 @@ private final class HoverController {
         }
 
         Task { [weak self] in
-            let result = await OCRReader.text(near: quartzPoint)
+            let result = await OCRReader.text(near: quartzPoint, within: ocrHint)
             guard let self else { return }
             guard let result else {
                 Diagnostics.log("放弃：OCR 没在光标附近找到可翻译的文字")
