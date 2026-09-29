@@ -15,6 +15,9 @@
     <string>local.hovertranslate</string>
     <key>CFBundleExecutable</key>
     <string>HoverTranslate</string>
+    <!-- 对应 Resources/AppIcon.icns，不写扩展名 -->
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundlePackageType</key>

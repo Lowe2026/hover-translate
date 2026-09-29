@@ -1,3 +1,5 @@
+<img src="Resources/AppIcon-1024.png" width="120" align="right" alt="悬停翻译">
+
 # 悬停翻译 · HoverTranslate
 
 > 按住 ⌥,鼠标停在英文上,译文原地出现。

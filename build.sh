@@ -24,6 +24,7 @@ rm -rf "$app_path"
 mkdir -p "$contents_path/MacOS" "$contents_path/Resources"
 cp "$project_dir/Info.plist" "$contents_path/Info.plist"
 cp "$project_dir/PkgInfo" "$contents_path/PkgInfo"
+cp "$project_dir/Resources/AppIcon.icns" "$contents_path/Resources/AppIcon.icns"
 cp "$binary_source" "$contents_path/MacOS/HoverTranslate"
 
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$contents_path/Info.plist" 2>/dev/null || true
