@@ -270,22 +270,27 @@ private enum AccessibilityReader {
         // 只有当父级文本"包含"子级文本、且没有膨胀太多倍时才采纳——
         // 这样能把被拆成多个 AXStaticText 的一句话接回来，
         // 又不会一路捞到整个窗口的内容。
+        // 关键前提：辅助功能只给一坨文字和一个框，**不告诉我们光标落在这坨
+        // 文字的第几个字**。所以一旦拿到的内容明显超过一段，从中取 600 字就
+        // 只能从头取，跟用户指的位置毫无关系——Electron（Claude 桌面版、
+        // Slack 等）把整块内容塞进一个节点时，正是这种情况。
+        // 这时候宁可判定 AX 不可信，返回 nil 交给 OCR：OCR 是按光标坐标就近
+        // 拼行的，位置是准的。
         var best: String?
         var current: AXUIElement? = hovered
         for _ in 0..<5 {
             guard let element = current else { break }
-            if let candidate = bestText(from: element), let tidied = TextNormalizer.tidy(candidate, maximumLength: 600) {
+            if let candidate = bestText(from: element),
+               let full = TextNormalizer.tidy(candidate, maximumLength: .max) {
                 if let existing = best {
-                    guard tidied.contains(existing), tidied.count <= existing.count * 6 else { break }
-                    // 顶到上限 = 这个祖先的文字被从头截断了。采纳它等于把光标
-                    // 所在的那一段挤出显示范围——Electron 应用里一个节点常常
-                    // 装着整块内容，越往上爬越拿不到用户真正指着的那一段。
-                    // 装不下就不扩展，退回子级。
-                    guard tidied.count < 600 else { break }
-                    best = tidied
+                    guard full.contains(existing), full.count <= existing.count * 6 else { break }
+                    // 扩展后超出一段的体量，停在子级即可，不必整个放弃。
+                    guard full.count <= 600 else { break }
                 } else {
-                    best = tidied
+                    // 锚点元素自己就装不下：这一坨没有位置信息可言，交给 OCR。
+                    guard full.count <= 600 else { return nil }
                 }
+                best = full
             }
             current = parent(of: element)
         }
