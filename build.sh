@@ -6,7 +6,6 @@ set -euo pipefail
 
 project_dir="${0:A:h}"
 version="0.4.0"
-output_root="$project_dir/../../outputs"
 # app 文件名固定不带版本号：路径变化也会让 TCC 把它当成新 app，
 # 每升一版就要重新授权一次。版本只体现在 Info.plist 的版本字段里。
 app_path="/Applications/悬停翻译.app"

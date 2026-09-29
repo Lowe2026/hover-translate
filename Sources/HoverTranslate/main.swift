@@ -19,11 +19,12 @@ private enum AppConstants {
 
 /// 排障日志。默认关闭，从菜单栏打开。只记录取词各阶段的判断，正文最多截 120 字。
 enum Diagnostics {
-    /// 可以从命令行改：defaults write local.hovertranslate diagnosticsEnabled -bool false
-    /// 当前默认开启，排障期用；定版前改回 false。
+    /// 默认关闭：日志会把悬停到的正文写进磁盘（最多 120 字），
+    /// 不该在用户不知情的时候开着。排障时从菜单栏打开，或者
+    /// defaults write local.hovertranslate diagnosticsEnabled -bool true
     nonisolated(unsafe) static var enabled: Bool = {
         let defaults = UserDefaults.standard
-        guard defaults.object(forKey: "diagnosticsEnabled") != nil else { return true }
+        guard defaults.object(forKey: "diagnosticsEnabled") != nil else { return false }
         return defaults.bool(forKey: "diagnosticsEnabled")
     }()
     private static let lock = NSLock()
