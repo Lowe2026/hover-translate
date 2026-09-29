@@ -277,6 +277,11 @@ private enum AccessibilityReader {
             if let candidate = bestText(from: element), let tidied = TextNormalizer.tidy(candidate, maximumLength: 600) {
                 if let existing = best {
                     guard tidied.contains(existing), tidied.count <= existing.count * 6 else { break }
+                    // 顶到上限 = 这个祖先的文字被从头截断了。采纳它等于把光标
+                    // 所在的那一段挤出显示范围——Electron 应用里一个节点常常
+                    // 装着整块内容，越往上爬越拿不到用户真正指着的那一段。
+                    // 装不下就不扩展，退回子级。
+                    guard tidied.count < 600 else { break }
                     best = tidied
                 } else {
                     best = tidied
